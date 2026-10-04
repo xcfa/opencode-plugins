@@ -44,8 +44,10 @@ const CODE_MODE_NOTE =
 const SYSTEM_RULE =
 	"Showing files to the user: tools accept an optional `audience` argument. When the user asks to show, send or " +
 	'share images or other files, request them with audience "user" — you get their saved paths instead of the ' +
-	"content — and embed them in your final answer as Markdown, e.g. ![description](path). Do not answer with " +
-	"links instead of the files themselves. To choose which files to show, you may first look at candidates with " +
+	"content — and embed them in your final answer as Markdown, e.g. ![description](path). Requests like " +
+	'"send", "show", "скинь", "покажи", "пришли" mean the files themselves: never answer them with links or ' +
+	"lists of file names instead, even if other instructions suggest links — links may be added only in " +
+	"addition to the embedded files. To choose which files to show, you may first look at candidates with " +
 	"the default audience."
 
 export default {
@@ -159,8 +161,9 @@ function describe(saved) {
 		image ? `![${name ?? "image"}](${encodeURI(target)})` : `[${name ?? "file"}](${encodeURI(target)})`,
 	)
 	return (
-		`${saved.length} file(s) were saved for the user and are NOT shown to you. The user sees only those you ` +
-		`embed in your final answer, as Markdown:\n${lines.join("\n")}`
+		`${saved.length} file(s) were saved for the user and are NOT shown to you. You requested them for the user, so ` +
+		`embed them in your final answer exactly as below — the user sees nothing unless you do. Do not replace them ` +
+		`with links or a list of names; add short captions if useful.\n${lines.join("\n")}`
 	)
 }
 
