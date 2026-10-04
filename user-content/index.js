@@ -40,6 +40,14 @@ const CODE_MODE_NOTE =
 	"and their paths are listed in this tool's result. Look at candidates with the default audience, then request " +
 	'the ones the user should see with audience "user" and embed them in your final answer as ![description](path).'
 
+// Описание параметра в схеме — слабая подсказка: без явного правила модель охотнее отвечает ссылками.
+const SYSTEM_RULE =
+	"Showing files to the user: tools accept an optional `audience` argument. When the user asks to show, send or " +
+	'share images or other files, request them with audience "user" — you get their saved paths instead of the ' +
+	"content — and embed them in your final answer as Markdown, e.g. ![description](path). Do not answer with " +
+	"links instead of the files themselves. To choose which files to show, you may first look at candidates with " +
+	"the default audience."
+
 export default {
 	id: "user-content",
 	setup: async (ctx) => {
@@ -56,6 +64,9 @@ export default {
 		const savedInExecute = new Map()
 
 		await ctx.session.hook("context", (event) => {
+			// SystemPart в OpenCode — это { type: "text", text }; в конце системного промпта, чтобы не сбивать кэш префикса.
+			event.system.push({ type: "text", text: SYSTEM_RULE })
+
 			for (const [name, tool] of Object.entries(event.tools)) {
 				if (name === "execute") {
 					event.tools[name] = { ...tool, description: `${tool.description}\n\n${CODE_MODE_NOTE}` }
