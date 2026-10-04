@@ -56,29 +56,31 @@ export default {
 				? ctx.options.directory
 				: path.join(os.homedir(), ".local", "share", "opencode", "user-content")
 
-		// Аргументы вызовов с audience: "user". Хуки before и after получают один и тот же объект аргументов.
-		const forUser = new WeakSet()
-		// id выполняющихся вызовов execute: вложенные вызовы Code Mode идут с тем же id.
+		// Вызов → сколько его запусков адресовано пользователю. Ключ — id вызова и имя инструмента: вложенные
+		// вызовы Code Mode идут с id внешнего execute, а объект аргументов по дороге может быть заменён
+		// (встроенный плагин tool-input-repair подставляет «починенную» копию), так что метить сам объект нельзя.
+		const forUser = new Map()
+		// id выполняющихся вызовов execute.
 		const running = new Set()
 		// id вызова execute → файлы, сохранённые во вложенных вызовах.
 		const savedInExecute = new Map()
 
+		// `audience` — в настоящих схемах MCP-инструментов: иначе tool-input-repair выбросит его из аргументов
+		// (у закрытых схем лишние поля удаляются), а модель в Code Mode не увидит его в сигнатуре.
+		await ctx.tool.transform((editor) => {
+			for (const tool of editor.list()) {
+				if (!tool.options?.namespace || !isJsonObjectSchema(tool.input)) continue
+				editor.update(tool.id, (item) => {
+					item.input = { ...item.input, properties: { ...(item.input.properties ?? {}), audience: AUDIENCE } }
+				})
+			}
+		})
+
 		await ctx.session.hook("context", (event) => {
 			// SystemPart в OpenCode — это { type: "text", text }; в конце системного промпта, чтобы не сбивать кэш префикса.
 			event.system.push({ type: "text", text: SYSTEM_RULE })
-
-			for (const [name, tool] of Object.entries(event.tools)) {
-				if (name === "execute") {
-					event.tools[name] = { ...tool, description: `${tool.description}\n\n${CODE_MODE_NOTE}` }
-					continue
-				}
-				const input = tool.input
-				if (input && typeof input === "object" && input.type === "object") {
-					event.tools[name] = {
-						...tool,
-						input: { ...input, properties: { ...(input.properties ?? {}), audience: AUDIENCE } },
-					}
-				}
+			if (event.tools.execute) {
+				event.tools.execute = { ...event.tools.execute, description: `${event.tools.execute.description}\n\n${CODE_MODE_NOTE}` }
 			}
 		})
 
@@ -91,7 +93,10 @@ export default {
 			if (!input || typeof input !== "object" || !("audience" in input)) return
 			const audience = input.audience
 			delete input.audience
-			if (audience === "user") forUser.add(input)
+			if (audience === "user") {
+				const key = callKey(event)
+				forUser.set(key, (forUser.get(key) ?? 0) + 1)
+			}
 		})
 
 		await ctx.tool.hook("execute.after", async (event) => {
@@ -104,7 +109,12 @@ export default {
 				return
 			}
 
-			if (event.status !== "completed" || !forUser.has(event.input)) return
+			const key = callKey(event)
+			const pending = forUser.get(key) ?? 0
+			if (pending === 0) return
+			if (pending === 1) forUser.delete(key)
+			else forUser.set(key, pending - 1)
+			if (event.status !== "completed") return
 
 			const content =
 				typeof event.result.content === "string"
@@ -158,6 +168,15 @@ function appendText(result, text) {
 	const content =
 		typeof result.content === "string" ? [{ type: "text", text: result.content }] : [...(result.content ?? [])]
 	return { ...result, content: [...content, { type: "text", text }] }
+}
+
+function callKey(event) {
+	return `${event.sessionID}\u0000${event.id}\u0000${event.tool}`
+}
+
+/** Схема MCP-инструмента — обычный JSON Schema объект (в отличие от схем Effect у встроенных инструментов). */
+function isJsonObjectSchema(input) {
+	return !!input && typeof input === "object" && input.type === "object" && !("ast" in input) && !("~standard" in input)
 }
 
 function safe(value) {
